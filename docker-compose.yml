@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.7.4-pg16
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: newsfeed
+      POSTGRES_PASSWORD: newsfeed_dev
+      POSTGRES_DB: newsfeed
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  pg_data:
