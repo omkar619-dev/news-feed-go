@@ -13,6 +13,7 @@ import (
 
     "github.com/omkar619-dev/news-feed-go/internal/db"
     "github.com/omkar619-dev/news-feed-go/internal/repository/postgres/sqlc"
+	"github.com/omkar619-dev/news-feed-go/internal/user"
 )
 
 func main() {
@@ -29,7 +30,7 @@ func main() {
     log.Println("connected to postgres")
 
     queries := sqlc.New(pool)
-    _ = queries
+    // _ = queries
 
     mux := http.NewServeMux()
 
@@ -53,6 +54,7 @@ func main() {
             "status": "ok",
         })
     })
+	mux.Handle("/signup", user.NewSignupHandler(queries))
 
     server := &http.Server{
         Addr:              ":3000",
