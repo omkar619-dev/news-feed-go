@@ -14,6 +14,8 @@ import (
     "github.com/omkar619-dev/news-feed-go/internal/db"
     "github.com/omkar619-dev/news-feed-go/internal/repository/postgres/sqlc"
 	"github.com/omkar619-dev/news-feed-go/internal/user"
+	"github.com/omkar619-dev/news-feed-go/internal/auth"
+
 )
 
 func main() {
@@ -31,6 +33,11 @@ func main() {
 
     queries := sqlc.New(pool)
     // _ = queries
+	jwtSecret := os.Getenv("JWT_SECRET")
+if jwtSecret == "" {
+    jwtSecret = "dev-secret-change-me-in-production"
+}
+tokenManager := auth.NewTokenManager(jwtSecret, 24*time.Hour)
 
     mux := http.NewServeMux()
 
@@ -55,6 +62,7 @@ func main() {
         })
     })
 	mux.Handle("/signup", user.NewSignupHandler(queries))
+	mux.Handle("/login", user.NewLoginHandler(queries, tokenManager))
 
     server := &http.Server{
         Addr:              ":3000",
