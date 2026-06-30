@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ── Fast, infra-free job: vet + build + UNIT tests. This is the green badge. ──
+  test:
+    name: vet · build · unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod   # use the version declared in go.mod
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...          # integration_test.go is tag-gated, so it's skipped here
+
+  # ── Integration job: real Postgres + Redis as service containers, then the
+  #    tag-gated integration test (the like hot-counter end to end). ──
+  integration:
+    name: integration (postgres + redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.7.4-pg16   # same image as docker-compose
+        env:
+          POSTGRES_USER: newsfeed
+          POSTGRES_PASSWORD: newsfeed_dev
+          POSTGRES_DB: newsfeed
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379                          # host 6380 → container 6379 (matches compose)
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Load schema
+        run: psql "$DATABASE_URL" -f internal/repository/postgres/schema.sql
+        env:
+          DATABASE_URL: postgres://newsfeed:newsfeed_dev@localhost:5432/newsfeed?sslmode=disable
+      - name: Integration tests
+        run: go test -tags=integration -run Integration ./internal/service/... -v
+        env:
+          DATABASE_URL: postgres://newsfeed:newsfeed_dev@localhost:5432/newsfeed?sslmode=disable
+          REDIS_ADDR: localhost:6380

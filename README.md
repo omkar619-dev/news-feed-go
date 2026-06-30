@@ -1,5 +1,7 @@
 # news-feed-go
 
+[![CI](https://github.com/omkar619-dev/news-feed-go/actions/workflows/ci.yml/badge.svg)](https://github.com/omkar619-dev/news-feed-go/actions/workflows/ci.yml)
+
 A Twitter/Reddit-style news feed in Go — built production-shape for distributed-systems learning and as a portfolio piece. It serves **one feed through two front doors** — a REST/JSON API *and* an **SSH terminal app** — sitting on a single shared domain core, backed by Postgres + pgvector, RabbitMQ, Redis, and Ollama embeddings.
 
 📝 Each design decision is written up on the [companion blog](https://omkar-blog.pages.dev) — including [the SSH front door & the ports-and-adapters refactor](https://omkar-blog.pages.dev/projects/a-social-feed-you-ssh-into/).
