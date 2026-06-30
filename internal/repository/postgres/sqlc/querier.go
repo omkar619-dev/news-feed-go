@@ -9,11 +9,128 @@ import (
 )
 
 type Querier interface {
+	// The simple, always-correct count. (Step 3 adds a Redis counter for hot reads.)
+	CountPostLikes(ctx context.Context, postID int64) (int64, error)
+	// parent_id is NULL for a top-level comment, or another comment's id for a reply.
+	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
+	CreatePost(ctx context.Context, arg CreatePostParams) (Post, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	// Owner-only. Cascade removes the comment's whole reply subtree.
+	// RETURNING tells us if a row was actually deleted (else ErrNoRows → 404).
+	DeleteComment(ctx context.Context, arg DeleteCommentParams) (int64, error)
+	DeletePost(ctx context.Context, arg DeletePostParams) error
 	DeleteUser(ctx context.Context, id int64) error
-	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// Fan-out-on-WRITE: push a freshly-created post into the precomputed timeline
+	// of every follower of its author. INSERT ... SELECT writes one row per
+	// follower in a single statement. ON CONFLICT DO NOTHING = idempotent.
+	// (Skipped at the call site when the author is a celebrity.)
+	FanOutPostToFollowers(ctx context.Context, arg FanOutPostToFollowersParams) error
+	// The relay claims a batch of not-yet-published events, oldest first.
+	// FOR UPDATE SKIP LOCKED row-locks the claimed rows and skips any a different
+	// relay already holds — so you can run several relays at once and no two of them
+	// will ever grab the same event.
+	FetchUnpublishedOutbox(ctx context.Context, batchSize int32) ([]Outbox, error)
+	// Near-duplicate / astroturf detection. Returns every OTHER post whose embedding
+	// is within a cosine DISTANCE THRESHOLD of the given post. Unlike GetRelatedPosts
+	// (which returns the top-N nearest, always something), this uses an ABSOLUTE
+	// threshold — the threshold itself is the definition of "is this a copy?". Posts
+	// below it are near-identical in meaning even if the words were shuffled.
+	FindNearDuplicates(ctx context.Context, arg FindNearDuplicatesParams) ([]FindNearDuplicatesRow, error)
+	// Idempotent: ON CONFLICT DO NOTHING means following someone you ALREADY
+	// follow is a successful no-op rather than a duplicate-key error.
+	FollowUser(ctx context.Context, arg FollowUserParams) error
+	// Fetch a post's ENTIRE comment tree (all nesting levels) with a recursive CTE.
+	GetCommentTree(ctx context.Context, postID int64) ([]GetCommentTreeRow, error)
+	// HYBRID feed, next page. Same UNION, with the (created_at, id) keyset cursor
+	// applied to the MERGED result in the outer query.
+	GetFeedAfter(ctx context.Context, arg GetFeedAfterParams) ([]Post, error)
+	// HYBRID feed, first page. Merges TWO sources with UNION:
+	//   (a) my precomputed timeline — posts pushed by NORMAL users I follow
+	//   (b) live posts by CELEBRITIES I follow — fetched at read time (not pushed)
+	// UNION (not UNION ALL) de-duplicates if a post appears in both.
+	GetFeedFirst(ctx context.Context, arg GetFeedFirstParams) ([]Post, error)
+	// Has this (user, key) already completed? If so, return the stored response so we
+	// can replay it instead of doing the work again.
+	GetIdempotentResponse(ctx context.Context, arg GetIdempotentResponseParams) (GetIdempotentResponseRow, error)
+	GetPostByID(ctx context.Context, id int64) (Post, error)
+	// Public profile: the user's basic info PLUS live counts, all in one query.
+	// Each (SELECT COUNT(*) ...) is a correlated scalar subquery — it re-runs for
+	// the matched user u, referencing u.id from the outer query.
+	GetProfileByUsername(ctx context.Context, username string) (GetProfileByUsernameRow, error)
+	// "More like this": find posts nearest to a GIVEN post's own embedding,
+	// excluding that post itself. The subquery fetches the target post's vector.
+	GetRelatedPosts(ctx context.Context, arg GetRelatedPostsParams) ([]Post, error)
+	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error)
+	// Identify the SSH visitor by their public key. ErrNoRows = unregistered → guest.
+	GetUserBySSHKey(ctx context.Context, publicKey string) (GetUserBySSHKeyRow, error)
 	GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error)
+	// Record (user, key) -> response. Called INSIDE the post-creation transaction, so
+	// a concurrent duplicate that already committed this key makes this INSERT fail
+	// with a unique violation (23505) — rolling back the whole tx, post included.
+	InsertIdempotencyKey(ctx context.Context, arg InsertIdempotencyKeyParams) error
+	// Write a domain event into the outbox. Called in the SAME transaction as the
+	// state change (e.g. creating a post), so the event and the change commit
+	// atomically — both or neither. This is the heart of the transactional outbox.
+	InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventParams) error
+	// Used on the write path: if the author is a celebrity, we SKIP fan-out
+	// (don't push to millions of timelines) and rely on read-time merge instead.
+	IsCelebrity(ctx context.Context, id int64) (bool, error)
+	// KEYWORD arm of hybrid search: exact-term (full-text) matching, ranked by
+	// ts_rank. Catches proper nouns / rare jargon (library names, error codes,
+	// usernames) that the embedding model blurs away.
+	// websearch_to_tsquery parses raw user input safely (quotes, OR, -negation) and
+	// never throws on weird syntax. It uses the same to_tsvector expression as the
+	// GIN index, so the WHERE clause is index-accelerated.
+	KeywordCandidates(ctx context.Context, arg KeywordCandidatesParams) ([]Post, error)
+	// Idempotent: ON CONFLICT DO NOTHING means liking twice is a no-op.
+	// RETURNING post_id tells us whether a NEW like was actually inserted (a row
+	// comes back) or it was already liked (no row → pgx.ErrNoRows). We'll use that
+	// distinction later to only bump the Redis counter on a real state change.
+	LikePost(ctx context.Context, arg LikePostParams) (int64, error)
+	// "Who follows user {id}?" — {id} is the FOLLOWEE; we want each FOLLOWER's
+	// public info. So filter on followee_id, join users on follower_id.
+	// Only id + username are returned (no email/PII on a public endpoint).
+	ListFollowers(ctx context.Context, followeeID int64) ([]ListFollowersRow, error)
+	// "Who does user {id} follow?" — {id} is the FOLLOWER; we want each FOLLOWEE's
+	// public info. So filter on follower_id, join users on followee_id.
+	ListFollowing(ctx context.Context, followerID int64) ([]ListFollowingRow, error)
+	// Every post's id + content, for the embedding backfill tool. Posts inserted
+	// directly via SQL (e.g. the eval corpus) never published a post.created event,
+	// so the worker never embedded them — this lets us embed them after the fact.
+	ListPostsForEmbedding(ctx context.Context) ([]ListPostsForEmbeddingRow, error)
+	// The global recent feed the TUI renders: post + author username + live like count.
+	ListRecentPosts(ctx context.Context, resultLimit int32) ([]ListRecentPostsRow, error)
+	// Next page: posts strictly OLDER than the (created_at, id) bookmark.
+	// The row-value comparison (created_at, id) < (cursor_time, cursor_id) is the
+	// tuple/tiebreaker we discussed: id breaks ties when two posts share a time.
+	ListUserPostsAfter(ctx context.Context, arg ListUserPostsAfterParams) ([]Post, error)
+	// First page: the newest posts by an author. No cursor yet.
+	ListUserPostsFirst(ctx context.Context, arg ListUserPostsFirstParams) ([]Post, error)
+	// Stamp an event as published, once the relay has handed it to the broker.
+	MarkOutboxPublished(ctx context.Context, id int64) error
+	// Claim a public key for a user (so future SSH visits identify them).
+	// Idempotent re-claim: ON CONFLICT keeps the key pointed at the latest user.
+	RegisterSSHKey(ctx context.Context, arg RegisterSSHKeyParams) error
+	// TWO-STAGE search: relevance is NOT the same as quality, so we don't just
+	// return "most on-topic" — we return "on-topic AND fresh AND from someone with reach".
+	//   Stage 1 (inner): HNSW fetches the nearest ~100 candidates by PURE cosine
+	//                    distance — fast, index-accelerated.
+	//   Stage 2 (outer): re-rank ONLY those candidates by a blended score:
+	//                    relevance × recency-decay × author-authority.
+	SearchPostsByEmbedding(ctx context.Context, arg SearchPostsByEmbeddingParams) ([]Post, error)
+	// SEMANTIC arm of hybrid search: PURE nearest-neighbour by meaning (cosine),
+	// with NO recency/engagement re-rank. RRF fuses raw RANKS, so each arm must be
+	// a clean ranked list — mixing quality signals in here would muddy the fusion.
+	// HNSW-accelerated, same as the semantic /search path.
+	SemanticCandidates(ctx context.Context, arg SemanticCandidatesParams) ([]Post, error)
+	// Idempotent too: deleting a follow that isn't there affects 0 rows, no error.
+	UnfollowUser(ctx context.Context, arg UnfollowUserParams) error
+	// RETURNING tells us if a like was actually removed (row) vs wasn't there (ErrNoRows).
+	UnlikePost(ctx context.Context, arg UnlikePostParams) (int64, error)
+	// Store (or replace) a post's embedding. Upsert so re-processing the same post
+	// (at-least-once delivery from the queue) just overwrites — idempotent.
+	UpsertPostEmbedding(ctx context.Context, arg UpsertPostEmbeddingParams) error
 }
 
 var _ Querier = (*Queries)(nil)

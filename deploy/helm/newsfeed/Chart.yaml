@@ -1,0 +1,9 @@
+apiVersion: v2
+name: newsfeed
+description: News Feed service — API + worker + Postgres(pgvector) + RabbitMQ + Redis
+type: application
+
+# version  = the CHART's version (bump when you change the chart).
+# appVersion = the version of the APP the chart deploys (informational).
+version: 0.1.0
+appVersion: "1.0.0"

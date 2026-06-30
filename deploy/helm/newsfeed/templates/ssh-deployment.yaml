@@ -1,0 +1,70 @@
+{{- if .Values.ssh.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-ssh
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.ssh.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "ssh") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "ssh") | nindent 8 }}
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - until nc -z {{ include "newsfeed.fullname" . }}-postgres 5432; do echo "waiting for postgres"; sleep 2; done
+      containers:
+        - name: ssh
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/ssh"] # FOURTH role of the same image — the SSH TUI
+          ports:
+            - containerPort: {{ .Values.ssh.port }}
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "newsfeed.fullname" . }}-secrets
+                  key: DB_PASSWORD
+            - name: DATABASE_URL
+              value: "postgres://newsfeed:$(DB_PASSWORD)@{{ include "newsfeed.fullname" . }}-postgres:5432/newsfeed?sslmode=disable"
+            - name: REDIS_ADDR
+              value: "{{ include "newsfeed.fullname" . }}-redis:6379"
+            # Write the SSH host key into a SUBDIR of /tmp, not /tmp itself.
+            # wish chmods the key's PARENT dir to 0700; /tmp exists as root-owned
+            # 1777, so chmod-ing it as non-root appuser fails ("operation not
+            # permitted"). A subdir doesn't exist yet → wish MkdirAll's it, owned
+            # by appuser → no chmod of a root dir. Ephemeral (regenerated on
+            # restart = a one-time "host key changed" warning; a PVC would persist).
+            - name: HOST_KEY_PATH
+              value: "/tmp/sshkeys/news_feed_host_ed25519"
+            # No RABBITMQ (creates post via the outbox→DB, the relay publishes),
+            # no JWT (the SSH key IS the auth), no OLLAMA (the worker embeds).
+          resources:
+            {{- toYaml .Values.ssh.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-ssh
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  # LoadBalancer → k3s svclb binds the node's port 23234, so it's reachable at the
+  # node's IP (including the Tailscale IP). That's how `ssh -p 23234 <tailnet-ip>` works.
+  type: LoadBalancer
+  selector:
+    {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "ssh") | nindent 4 }}
+  ports:
+    - port: {{ .Values.ssh.port }}
+      targetPort: {{ .Values.ssh.port }}
+{{- end }}

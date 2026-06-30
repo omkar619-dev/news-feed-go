@@ -11,5 +11,25 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
 
+  rabbitmq:
+    image: rabbitmq:3-management        # "-management" includes the web UI
+    environment:
+      RABBITMQ_DEFAULT_USER: newsfeed
+      RABBITMQ_DEFAULT_PASS: newsfeed_dev
+    ports:
+      - "5673:5672"      # AMQP on host 5673 (5672 is taken by a NATIVE RabbitMQ)
+      - "15673:15672"    # management UI → http://localhost:15673
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"   # host 6380 — proactively dodging any native Redis on 6379
+    volumes:
+      - redis_data:/data
+
 volumes:
   pg_data:
+  rabbitmq_data:
+  redis_data:

@@ -9,10 +9,41 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
+type Comment struct {
+	ID        int64              `json:"id"`
+	PostID    int64              `json:"post_id"`
+	AuthorID  int64              `json:"author_id"`
+	ParentID  pgtype.Int8        `json:"parent_id"`
+	Content   string             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Follow struct {
 	FollowerID int64              `json:"follower_id"`
 	FolloweeID int64              `json:"followee_id"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type IdempotencyKey struct {
+	UserID         int64              `json:"user_id"`
+	Key            string             `json:"key"`
+	ResponseStatus int32              `json:"response_status"`
+	ResponseBody   []byte             `json:"response_body"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type Like struct {
+	UserID    int64              `json:"user_id"`
+	PostID    int64              `json:"post_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type Outbox struct {
+	ID          int64              `json:"id"`
+	EventType   string             `json:"event_type"`
+	Payload     []byte             `json:"payload"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
 }
 
 type Post struct {
@@ -27,6 +58,12 @@ type PostEmbedding struct {
 	Embedding pgvector.Vector `json:"embedding"`
 }
 
+type SshKey struct {
+	PublicKey string             `json:"public_key"`
+	UserID    int64              `json:"user_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Timeline struct {
 	UserID     int64              `json:"user_id"`
 	PostID     int64              `json:"post_id"`
@@ -38,5 +75,6 @@ type User struct {
 	Username     string             `json:"username"`
 	Email        string             `json:"email"`
 	PasswordHash string             `json:"password_hash"`
+	IsCelebrity  bool               `json:"is_celebrity"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }

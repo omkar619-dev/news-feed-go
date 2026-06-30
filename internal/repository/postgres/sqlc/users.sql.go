@@ -55,6 +55,45 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
 	return err
 }
 
+const getProfileByUsername = `-- name: GetProfileByUsername :one
+SELECT
+    u.id,
+    u.username,
+    u.created_at,
+    (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id) AS followers_count,
+    (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id) AS following_count,
+    (SELECT COUNT(*) FROM posts   p WHERE p.author_id  = u.id) AS posts_count
+FROM users u
+WHERE u.username = $1
+LIMIT 1
+`
+
+type GetProfileByUsernameRow struct {
+	ID             int64              `json:"id"`
+	Username       string             `json:"username"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	FollowersCount int64              `json:"followers_count"`
+	FollowingCount int64              `json:"following_count"`
+	PostsCount     int64              `json:"posts_count"`
+}
+
+// Public profile: the user's basic info PLUS live counts, all in one query.
+// Each (SELECT COUNT(*) ...) is a correlated scalar subquery — it re-runs for
+// the matched user u, referencing u.id from the outer query.
+func (q *Queries) GetProfileByUsername(ctx context.Context, username string) (GetProfileByUsernameRow, error) {
+	row := q.db.QueryRow(ctx, getProfileByUsername, username)
+	var i GetProfileByUsernameRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.CreatedAt,
+		&i.FollowersCount,
+		&i.FollowingCount,
+		&i.PostsCount,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, username, email, password_hash, created_at
 FROM users
@@ -62,9 +101,17 @@ WHERE email = $1
 LIMIT 1
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+type GetUserByEmailRow struct {
+	ID           int64              `json:"id"`
+	Username     string             `json:"username"`
+	Email        string             `json:"email"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
-	var i User
+	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -125,4 +172,17 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const isCelebrity = `-- name: IsCelebrity :one
+SELECT is_celebrity FROM users WHERE id = $1
+`
+
+// Used on the write path: if the author is a celebrity, we SKIP fan-out
+// (don't push to millions of timelines) and rely on read-time merge instead.
+func (q *Queries) IsCelebrity(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRow(ctx, isCelebrity, id)
+	var is_celebrity bool
+	err := row.Scan(&is_celebrity)
+	return is_celebrity, err
 }

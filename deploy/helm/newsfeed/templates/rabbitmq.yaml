@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-rabbitmq
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "newsfeed.fullname" . }}-rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "rabbitmq") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "rabbitmq") | nindent 8 }}
+    spec:
+      containers:
+        - name: rabbitmq
+          image: {{ .Values.rabbitmq.image }}
+          ports:
+            - { containerPort: 5672, name: amqp }
+            - { containerPort: 15672, name: management }
+          env:
+            # The DEFAULT_USER/PASS create the user on first boot — pulled from the Secret.
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "newsfeed.fullname" . }}-secrets
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "newsfeed.fullname" . }}-secrets
+                  key: RABBITMQ_PASS
+          readinessProbe:
+            tcpSocket:
+              port: 5672
+            initialDelaySeconds: 20 # RabbitMQ is slow to boot (~30s on weak CPUs)
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.rabbitmq.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-rabbitmq
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "rabbitmq") | nindent 4 }}
+  ports:
+    - { port: 5672, targetPort: 5672, name: amqp }
+    - { port: 15672, targetPort: 15672, name: management }

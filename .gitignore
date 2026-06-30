@@ -5,3 +5,18 @@
 .env.local
 node_modules/
 .DS_Store
+
+# SSH host keys — generated at runtime, NEVER commit (private key)
+news_feed_host_ed25519
+news_feed_host_ed25519.pub
+
+# Docker image tarballs (build output)
+*.tar
+
+# local secret overrides for the Helm chart
+*secret*.values.yaml
+secrets.values.yaml
+
+# scratch / local request bodies
+post.json
+embed.json

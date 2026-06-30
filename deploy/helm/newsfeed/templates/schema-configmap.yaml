@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-schema
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+data:
+  # .Files.Get reads a file from INSIDE the chart; indent 4 lines it up under
+  # the "schema.sql: |" block scalar. This whole file is mounted into Postgres's
+  # /docker-entrypoint-initdb.d and runs on first boot.
+  schema.sql: |
+{{ .Files.Get "files/schema.sql" | indent 4 }}

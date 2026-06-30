@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-postgres
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  # serviceName ties the StatefulSet to its headless Service (below) → stable DNS.
+  serviceName: {{ include "newsfeed.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "postgres") | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: newsfeed
+            - name: POSTGRES_DB
+              value: newsfeed
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "newsfeed.fullname" . }}-secrets
+                  key: DB_PASSWORD
+            # Put the actual data in a SUBDIR of the mount — avoids the classic
+            # "directory not empty (lost+found)" error some volumes cause.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d # *.sql here run on first boot
+      volumes:
+        - name: initdb
+          configMap:
+            name: {{ include "newsfeed.fullname" . }}-schema
+  # volumeClaimTemplates: StatefulSets create a PERSISTENT disk per pod from this.
+  # The data survives pod restarts (unlike a Deployment's ephemeral storage).
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-postgres
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  clusterIP: None # "headless" — gives the StatefulSet pod stable internal DNS
+  selector:
+    {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "postgres") | nindent 4 }}
+  ports:
+    - port: 5432
+      targetPort: 5432

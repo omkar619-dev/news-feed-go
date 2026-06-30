@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-redis
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "newsfeed.fullname" . }}-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "redis") | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "newsfeed.fullname" . }}-redis
+  labels:
+    {{- include "newsfeed.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "newsfeed.selectorLabels" (dict "ctx" . "component" "redis") | nindent 4 }}
+  ports:
+    - port: 6379
+      targetPort: 6379

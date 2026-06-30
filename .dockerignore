@@ -1,0 +1,16 @@
+# Keep the Docker build context small + clean (faster builds, no junk in the image).
+.git
+.gitignore
+*.md
+.vscode
+.idea
+
+# local dev scratch files we created during testing
+post.json
+embed.json
+pull.json
+body.json
+
+# the Dockerfile itself doesn't need to be in the context
+Dockerfile
+.dockerignore

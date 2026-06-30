@@ -1,0 +1,81 @@
+# ── The app image (built by our Dockerfile; carries BOTH api + worker) ──
+image:
+  repository: news-feed
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# ── API (web server) ──
+api:
+  replicaCount: 2
+  port: 3000
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# ── Worker (queue consumer + embedder) ──
+worker:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# ── Relay (transactional-outbox publisher: DB outbox → RabbitMQ) ──
+relay:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+# ── SSH TUI (terminal feed; the SSH public key IS the login) ──
+ssh:
+  enabled: true
+  replicaCount: 1
+  port: 23234
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+# ── Postgres + pgvector ──
+postgres:
+  image: pgvector/pgvector:0.7.4-pg16
+  storage: 1Gi
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# ── RabbitMQ ──
+rabbitmq:
+  image: rabbitmq:3-management
+  storage: 1Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+
+# ── Redis ──
+redis:
+  image: redis:7-alpine
+  storage: 256Mi
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+# ── Ollama (embedding model) — EXTERNAL by default ──
+# The embedder reads this URL. We keep Ollama OUTSIDE the cluster so it can run
+# wherever the hardware suits it (laptop/New PC over Tailscale). Override per env.
+# On Docker-Desktop k3d, host.docker.internal reaches your host's Ollama.
+ollamaURL: "http://host.docker.internal:11434"
+
+# ── Ingress ──
+ingress:
+  enabled: true
+  host: newsfeed.local
+
+# ── Secrets ──
+# DEV defaults only. Real values come from a gitignored override file
+# (-f secrets.values.yaml) — NEVER commit real secrets. (Same pattern as
+# StudentSystemGo's gitignored secrets.values.yaml.)
+secrets:
+  dbPassword: newsfeed_dev
+  jwtSecret: dev-secret-change-me-in-production
+  rabbitmqUser: newsfeed
+  rabbitmqPass: newsfeed_dev
