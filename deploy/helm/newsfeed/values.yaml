@@ -75,6 +75,7 @@ ingress:
 # (-f secrets.values.yaml) — NEVER commit real secrets. (Same pattern as
 # StudentSystemGo's gitignored secrets.values.yaml.)
 secrets:
+  create: true
   dbPassword: newsfeed_dev
   jwtSecret: dev-secret-change-me-in-production
   rabbitmqUser: newsfeed
